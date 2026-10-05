@@ -1,0 +1,3 @@
+[build]
+# Keep direct Cargo invocations responsive on the developer's machine.
+jobs = 2

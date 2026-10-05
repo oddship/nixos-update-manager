@@ -1,0 +1,25 @@
+name: Bug report
+description: Report an incorrect result, failed operation, or UI problem.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include configuration secrets, private URLs, or credentials. Report security vulnerabilities privately as described in SECURITY.md.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include what you expected and steps to reproduce with a minimal synthetic configuration if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions and operation
+      description: App revision, NixOS/Nix/GNOME versions, architecture, and whether this was Check, Prepare, Apply, or Commit.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Candidate state, error message, and screenshots. For an Apply failure, include actual running-system/profile paths and whether the lock or HEAD changed.

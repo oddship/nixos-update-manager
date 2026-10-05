@@ -1,0 +1,7 @@
+# Shared project-local defaults; sourced by development/build entry points.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-$CARGO_BUILD_JOBS}"
+if [[ ! "$CARGO_BUILD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "CARGO_BUILD_JOBS must be a positive integer" >&2
+  exit 2
+fi

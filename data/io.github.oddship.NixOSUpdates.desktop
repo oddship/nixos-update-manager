@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=NixOS Update Manager
+Comment=Prepare and review updates to your NixOS flake
+Exec=nixos-update-manager
+Icon=software-update-available-symbolic
+Type=Application
+Categories=System;GTK;
+StartupNotify=true
+X-GNOME-UsesNotifications=true
+DBusActivatable=true

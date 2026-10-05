@@ -1,0 +1,8 @@
+{
+  "uuid": "nixos-updates@oddship.github.io",
+  "name": "NixOS Update Manager",
+  "description": "Show update progress and open the NixOS Update Manager review from the top bar.",
+  "shell-version": ["50"],
+  "url": "https://github.com/oddship/nixos-update-manager",
+  "version": 1
+}

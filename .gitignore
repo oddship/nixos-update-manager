@@ -1,0 +1,15 @@
+/target/
+/result*
+/artifacts/
+*.qcow2
+__pycache__/
+
+/.direnv/
+/.env
+/.env.*
+!/.env.example
+/.cargo/credentials
+/.cargo/credentials.toml
+/.codex/
+/.agents/
+/.aws/

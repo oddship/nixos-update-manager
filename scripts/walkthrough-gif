@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Encode the real disposable-GNOME captures; never fabricate application screens.
+cd "$(dirname "$0")/.."
+export MAGICK_THREAD_LIMIT="${CARGO_BUILD_JOBS:-2}"
+command -v magick >/dev/null
+font="$(fc-match -f '%{file}' sans)"
+work="$(mktemp -d /tmp/nixos-updates-walkthrough.XXXXXX)"
+trap 'rm -rf "$work"' EXIT
+captions=(
+  '1 / 12   Open NixOS Updates'
+  '2 / 12   Choose your Git configuration folder'
+  '3 / 12   The matching machine hostname is selected'
+  '4 / 12   Check progress is visible in the app and top bar'
+  '5 / 12   Prepare the available update'
+  '6 / 12   Follow preparation progress'
+  '7 / 12   Preparation continues with the app closed'
+  '8 / 12   Click the completed preparation notification'
+  '9 / 12   Review changes before applying'
+  '10 / 12   Confirm Apply and an optional lock-only commit'
+  '11 / 12   Authenticate through the system prompt'
+  '12 / 12   The reviewed system is applied and the lock is committed'
+)
+delays=(250 250 250 300 300 350 350 400 450 550 450 600)
+frames=(docs/walkthrough/frames/*.png)
+test "${#frames[@]}" -eq "${#captions[@]}"
+test "${#frames[@]}" -eq "${#delays[@]}"
+animation_args=()
+for i in "${!frames[@]}"; do
+  magick "${frames[$i]}" -resize 1152x720 \
+    -background '#20242e' -gravity south -splice 0x52 \
+    -font "$font" -pointsize 20 -fill white -annotate +0+15 "${captions[$i]}" \
+    "$work/frame-$i.png"
+  animation_args+=(-delay "${delays[$i]}" "$work/frame-$i.png")
+done
+# Twelve held screenshots: a readable 45-second loop, with waiting omitted.
+magick "${animation_args[@]}" \
+  -loop 0 -layers Optimize docs/walkthrough/nixos-updates.gif

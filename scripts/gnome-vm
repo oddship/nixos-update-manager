@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p artifacts/gnome-runtime
+bash scripts/nix-build nixosConfigurations.demo.config.system.build.vm --out-link artifacts/gnome-vm
+runtime="$(mktemp -d /tmp/nixos-updates-vm.XXXXXX)"
+printf '%s\n' "$runtime" > artifacts/gnome-runtime/monitor-directory
+export NIX_DISK_IMAGE="$PWD/artifacts/gnome-runtime/demo.qcow2"
+export QEMU_OPTS="-display none -serial mon:stdio -qmp unix:$runtime/qmp,server=on,wait=off"
+echo "Guest monitor: $runtime/qmp" >&2
+exec artifacts/gnome-vm/bin/run-updates-demo-vm

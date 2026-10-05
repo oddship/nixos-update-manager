@@ -1,0 +1,33 @@
+[package]
+name = "nixos-update-manager"
+version = "0.1.0"
+edition = "2024"
+default-run = "nixos-update-manager"
+license = "MIT"
+description = "Native GNOME update review for local NixOS flake repositories"
+repository = "https://github.com/oddship/nixos-update-manager"
+readme = "README.md"
+keywords = ["nixos", "gnome", "flakes", "updates"]
+categories = ["gui", "config"]
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+fs2 = "0.4"
+tempfile = "3"
+libc = "0.2"
+gtk = { package = "gtk4", version = "0.10", features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.8", features = ["v1_5"] }
+
+# GTK bindings are large; debug symbols and full release optimisation add build
+# time without helping this I/O-bound preview. Keep local rebuilds incremental.
+[profile.dev]
+debug = 0
+
+[profile.release]
+opt-level = 1
+codegen-units = 16

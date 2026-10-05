@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/build-limits"
+# Match nix-build's source filtering while files are still untracked.
+exec nix develop --max-jobs 1 --cores "$CARGO_BUILD_JOBS" --impure --expr 'let src = builtins.path {
+  path = ./.;
+  filter = path: type: !(builtins.elem (baseNameOf path) [ ".aws" "__pycache__" "target" "artifacts" ".git" ".direnv" ".codex" ".agents" "credentials" "credentials.toml" ]) && builtins.substring 0 4 (baseNameOf path) != ".env";
+}; in (builtins.getFlake (builtins.unsafeDiscardStringContext (toString src))).devShells.x86_64-linux.default' "$@"
