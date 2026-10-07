@@ -1,7 +1,7 @@
 use crate::{
     apply::ApplyPlan,
-    backend::discover_hosts,
     backend::{Candidate, State, Store},
+    backend::{discover_hosts, host_flakes},
     repository::Repository,
 };
 use adw::prelude::*;
@@ -1008,6 +1008,10 @@ fn discover(path: PathBuf, tx: mpsc::Sender<Discovery>, generation: Arc<AtomicU6
     let request = generation.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<_> {
+            let names = host_flakes(&path);
+            if !names.is_empty() {
+                return Ok((path.canonicalize()?, names));
+            }
             let repo = Repository::open(&path)?;
             let temp = tempfile::tempdir()?;
             let flake = repo.snapshot(&temp.path().join("source"), &repo.fingerprint()?)?;
