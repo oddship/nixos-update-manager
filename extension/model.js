@@ -32,7 +32,8 @@ export function latestFor(records, settings, canonicalize) {
         if (record?.schema_version !== 1 || typeof repo?.root !== 'string' || !repo.root.startsWith('/') || typeof repo?.flake_dir !== 'string')
             return false;
         const path = canonicalize(`${repo.root}/${repo.flake_dir}`);
-        return path === canonicalize(settings.path) && record.host === settings.host && typeof record.state === 'string';
+        const folder = canonicalize(settings.path);
+        return (path === folder || path === `${folder}/hosts/${settings.host}`) && record.host === settings.host && typeof record.state === 'string';
     });
     const timestamp = record => Number.isFinite(record.created_at_millis) ? record.created_at_millis : (Number.isFinite(record.created_at) ? record.created_at * 1000 : 0);
     return matches.sort((a, b) => timestamp(b) - timestamp(a))[0] ?? null;
