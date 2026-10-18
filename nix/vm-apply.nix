@@ -99,6 +99,8 @@ in pkgs.testers.runNixOSTest {
     # Without an authentication agent, refusal changes neither checkout nor system.
     machine.fail("su - tester -c " + shlex.quote(command + "apply candidate-refusal"))
     assert show("candidate-refusal")["state"] == "failed"
+    refusal_diagnosis = json.loads(user(command + "diagnose candidate-refusal"))["diagnosis"]
+    assert "Apply attempt was recorded" in refusal_diagnosis["system_status"]
     assert machine.succeed("readlink -f /run/current-system").strip() == baseline
     assert machine.succeed("cat /home/tester/config/flake.lock").strip() == "{}"
     assert machine.succeed("sha256sum /home/tester/config/.git/index").split()[0] == initial_index
@@ -127,6 +129,9 @@ in pkgs.testers.runNixOSTest {
     machine.fail("su - tester -c " + shlex.quote(command + "apply candidate-hook --commit --message 'flake: fixture two'"))
     failed_commit = show("candidate-hook")
     assert failed_commit["state"] == "commit_needs_attention", failed_commit
+    commit_diagnosis = json.loads(user(command + "diagnose candidate-hook"))["diagnosis"]
+    assert commit_diagnosis["category"] == "git_commit"
+    assert "Do not apply again" in commit_diagnosis["system_status"]
     assert failed_commit["application"]["actual"]["running"] == candidate
     assert git("rev-parse HEAD") == head_before_hook
     assert machine.succeed("readlink -f /run/current-system").strip() == candidate
@@ -145,6 +150,10 @@ in pkgs.testers.runNixOSTest {
     machine.fail("su - tester -c " + shlex.quote(command + "apply candidate-partial --commit --message 'must not commit'"))
     partial = show("candidate-partial")
     assert partial["state"] == "apply_needs_attention", partial
+    partial_diagnosis = json.loads(user(command + "diagnose candidate-partial"))["diagnosis"]
+    assert "may have changed" in partial_diagnosis["system_status"]
+    assert "success are not confirmed" in partial_diagnosis["system_status"]
+    assert "/home/tester" not in json.dumps(partial_diagnosis)
     assert not partial["application"]["activation_completed"]
     assert partial["application"]["actual"]["running"] == "${failedActivation}"
     assert partial["application"]["actual"]["profile"] == "${failedActivation}"

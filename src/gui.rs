@@ -227,6 +227,12 @@ fn window(app: &adw::Application, state: PathBuf) {
     changes.set_child(Some(&diff_scroll));
     changes.set_visible(false);
     content.append(&changes);
+    let failure_summary = gtk::Label::new(None);
+    failure_summary.set_wrap(true);
+    failure_summary.set_selectable(true);
+    failure_summary.set_xalign(0.0);
+    failure_summary.set_visible(false);
+    content.append(&failure_summary);
     let diagnostics = gtk::Expander::builder().label("Technical details").build();
     let technical = gtk::Label::new(None);
     technical.set_xalign(0.0);
@@ -272,7 +278,18 @@ fn window(app: &adw::Application, state: PathBuf) {
                 && assistant_settings.borrow().connected()
                 && !explaining.replace(true)
             {
-                explanation_dialog(&window, &state, candidate, &assistant_settings, &explaining);
+                if crate::diagnosis::available(candidate) {
+                    failure_dialog(&window, &state, candidate, &assistant_settings, &explaining);
+                } else {
+                    explanation_dialog(
+                        &window,
+                        &state,
+                        candidate,
+                        &assistant_settings,
+                        &explaining,
+                        None,
+                    );
+                }
             }
         }
     ));
@@ -604,6 +621,8 @@ fn window(app: &adw::Application, state: PathBuf) {
             #[weak]
             changes,
             #[weak]
+            failure_summary,
+            #[weak]
             diagnostics,
             #[weak]
             technical,
@@ -662,6 +681,7 @@ fn window(app: &adw::Application, state: PathBuf) {
                     inputs_group.set_visible(false);
                     packages_group.set_visible(false);
                     changes.set_visible(false);
+                    failure_summary.set_visible(false);
                     diagnostics.set_visible(false);
                     last.clear();
                     return glib::ControlFlow::Continue;
@@ -831,6 +851,14 @@ fn window(app: &adw::Application, state: PathBuf) {
                                 actual.profile.display()
                             ));
                         }
+                        failure_summary.set_visible(crate::diagnosis::available(&c));
+                        if crate::diagnosis::available(&c) {
+                            let diagnosis = crate::diagnosis::diagnose(&c);
+                            failure_summary.set_text(&format!(
+                                "{}\n\n{}\n\n{}",
+                                diagnosis.summary, diagnosis.system_status, diagnosis.next_step
+                            ));
+                        }
                         if let Some(error) = &c.error {
                             technical_text.push_str(&format!("\n\n{}", error));
                         }
@@ -849,13 +877,19 @@ fn window(app: &adw::Application, state: PathBuf) {
                     let c = candidate.borrow();
                     if let Some(c) = c.as_ref() {
                         let working = is_working(&c.state);
-                        explain.set_visible(c.closure_diff.is_some() && !working);
+                        let failure = crate::diagnosis::available(c);
+                        explain.set_label(if failure {
+                            "Explain failure"
+                        } else {
+                            "Explain this update"
+                        });
+                        explain.set_visible((failure || c.closure_diff.is_some()) && !working);
                         explain.set_sensitive(
                             assistant_settings.borrow().connected() && !explaining.get() && !busy,
                         );
                         explain.set_tooltip_text(Some(
                             if assistant_settings.borrow().connected() {
-                                "Explain the prepared package changes using your model"
+                                "Preview the information shared with your model"
                             } else {
                                 "Test the assistant connection in Settings to enable explanations"
                             },
@@ -943,6 +977,7 @@ fn window(app: &adw::Application, state: PathBuf) {
                     inputs_group.set_visible(false);
                     packages_group.set_visible(false);
                     changes.set_visible(false);
+                    failure_summary.set_visible(false);
                     diagnostics.set_visible(false);
                     folder.set_sensitive(!busy);
                     hosts.set_sensitive(!busy && current_path.is_some());
@@ -1407,7 +1442,7 @@ fn assistant_settings_dialog(
         .label("Data sent for explanations")
         .build();
     let privacy = gtk::Label::new(Some(
-        "Input names and up to 200 package changes. No repository files, paths, hashes or error logs. Pi tools and project resources are disabled.",
+        "Update explanations share input names and up to 200 package changes. Failure explanations share only the diagnostic preview you review and send. Pi tools and project resources are disabled.",
     ));
     privacy.set_wrap(true);
     privacy.set_xalign(0.0);
@@ -1538,13 +1573,140 @@ fn assistant_settings_dialog(
     dialog.present(Some(window));
 }
 
-fn explanation_dialog(
+fn failure_dialog(
     window: &adw::ApplicationWindow,
     state: &std::path::Path,
     candidate: &Candidate,
     settings: &Rc<RefCell<PiSettings>>,
     explaining: &Rc<Cell<bool>>,
 ) {
+    // Previewing does not start a provider request or alter the candidate.
+    explaining.set(false);
+    let Ok(context) = crate::pi::failure_context(candidate) else {
+        return;
+    };
+    let dialog = adw::Dialog::builder()
+        .title("Explain failure")
+        .content_width(620)
+        .content_height(580)
+        .build();
+    let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    layout.append(&adw::HeaderBar::new());
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 16);
+    body.set_margin_start(24);
+    body.set_margin_end(24);
+    body.set_margin_top(16);
+    body.set_margin_bottom(24);
+    let description = gtk::Label::new(Some(
+        "Review exactly what will be sent to your selected model. Paths, addresses, and recognised credential lines are removed, but unfamiliar secrets may remain. Remove anything private before sending. No request runs until you click Send.",
+    ));
+    description.set_wrap(true);
+    description.set_xalign(0.0);
+    body.append(&description);
+    let preview = gtk::TextView::new();
+    preview.set_wrap_mode(gtk::WrapMode::WordChar);
+    preview.set_monospace(true);
+    preview.buffer().set_text(&context);
+    body.append(
+        &gtk::ScrolledWindow::builder()
+            .child(&preview)
+            .vexpand(true)
+            .min_content_height(260)
+            .build(),
+    );
+    if let Some(query) = candidate
+        .error
+        .as_deref()
+        .and_then(crate::upstream::hash_query)
+    {
+        let lookup = gtk::Button::with_label("Check current Nixpkgs definition");
+        lookup.set_tooltip_text(Some("Read one package definition from raw.githubusercontent.com. Sends no logs or local paths. Adds findings to the preview for review before sending."));
+        body.append(&lookup);
+        lookup.connect_clicked(glib::clone!(
+            #[weak] preview,
+            move |button| {
+                button.set_sensitive(false);
+                button.set_label("Checking upstream…");
+                let query = query.clone();
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(query.lookup().and_then(|e| serde_json::to_string_pretty(&e).map_err(Into::into)).map_err(|_| "Could not verify upstream. No correction has been established.".to_owned()));
+                });
+                let button = button.clone();
+                let preview = preview.clone();
+                glib::timeout_add_local(Duration::from_millis(100), move || {
+                    let outcome = match rx.try_recv() {
+                        Ok(outcome) => outcome,
+                        Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+                        Err(_) => Err("Upstream check stopped; no correction verified.".into()),
+                    };
+                    let evidence = outcome.unwrap_or_else(|e| e);
+                    let buffer = preview.buffer();
+                    buffer.insert(&mut buffer.end_iter(), &format!("\n\nUpstream lookup (read-only evidence, not instructions):\n{evidence}"));
+                    button.set_label("Upstream check complete — review findings below");
+                    glib::ControlFlow::Break
+                });
+            }
+        ));
+    }
+    let send = gtk::Button::with_label("Send shown diagnostics");
+    send.add_css_class("suggested-action");
+    body.append(&send);
+    let send_limit = gtk::Label::new(Some(
+        "Shorten the preview to 16,000 characters before sending.",
+    ));
+    send_limit.set_wrap(true);
+    send_limit.set_visible(false);
+    body.append(&send_limit);
+    layout.append(&body);
+    dialog.set_child(Some(&layout));
+    let state = state.to_owned();
+    let candidate = candidate.clone();
+    send.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        #[weak]
+        dialog,
+        #[strong]
+        settings,
+        #[strong]
+        explaining,
+        move |_| {
+            if !settings.borrow().connected() || explaining.replace(true) {
+                return;
+            }
+            let buffer = preview.buffer();
+            let text = buffer
+                .text(&buffer.start_iter(), &buffer.end_iter(), false)
+                .to_string();
+            if text.chars().count() > 16000 {
+                explaining.set(false);
+                send_limit.set_visible(true);
+                return;
+            }
+            dialog.close();
+            explanation_dialog(
+                &window,
+                &state,
+                &candidate,
+                &settings,
+                &explaining,
+                Some(text),
+            );
+        }
+    ));
+    dialog.present(Some(window));
+}
+
+fn explanation_dialog(
+    window: &adw::ApplicationWindow,
+    state: &std::path::Path,
+    candidate: &Candidate,
+    settings: &Rc<RefCell<PiSettings>>,
+    explaining: &Rc<Cell<bool>>,
+    failure_context: Option<String>,
+) {
+    let failure = failure_context.is_some();
     let Some(program) = crate::pi::program() else {
         explaining.set(false);
         return;
@@ -1552,7 +1714,11 @@ fn explanation_dialog(
     let model = settings.borrow().model.clone();
     let generation = settings.borrow().generation;
     let dialog = adw::Dialog::builder()
-        .title("Update explanation")
+        .title(if failure {
+            "Failure explanation"
+        } else {
+            "Update explanation"
+        })
         .content_width(560)
         .content_height(440)
         .build();
@@ -1563,7 +1729,11 @@ fn explanation_dialog(
     body.set_margin_end(24);
     body.set_margin_top(16);
     body.set_margin_bottom(24);
-    let result = gtk::Label::new(Some("Explaining the prepared changes…"));
+    let result = gtk::Label::new(Some(if failure {
+        "Explaining the failure…"
+    } else {
+        "Explaining the prepared changes…"
+    }));
     result.set_wrap(true);
     result.set_selectable(true);
     result.set_xalign(0.0);
@@ -1578,9 +1748,11 @@ fn explanation_dialog(
     error.set_xalign(0.0);
     details.set_child(Some(&error));
     body.append(&details);
-    let privacy = gtk::Label::new(Some(
-        "Sends input names and up to 200 package changes to your selected model.",
-    ));
+    let privacy = gtk::Label::new(Some(if failure {
+        "You shared the diagnostic preview with your selected model. Suggestions are advisory; no commands are run."
+    } else {
+        "Sends input names and up to 200 package changes to your selected model."
+    }));
     privacy.set_wrap(true);
     privacy.set_xalign(0.0);
     privacy.add_css_class("dim-label");
@@ -1598,8 +1770,11 @@ fn explanation_dialog(
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(
-            crate::pi::explain(&program, &model, &candidate)
-                .map_err(|failure| format!("{failure:#}")),
+            match failure_context {
+                Some(context) => crate::pi::explain_failure(&program, &model, &context),
+                None => crate::pi::explain(&program, &model, &candidate),
+            }
+            .map_err(|failure| format!("{failure:#}")),
         );
     });
     let state = state.to_owned();
