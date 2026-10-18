@@ -207,20 +207,37 @@ pub fn excerpt(error: &str) -> (String, bool) {
             .join(" ");
         lines.push(safe);
     }
-    // Nix prints verbose build plans first, but the causal error and dependency
-    // cascade last. Keep both ends so early context cannot crowd out the failure.
+    // Keep the first causal error even when a long dependency cascade follows it.
+    // Nix often prints a large plan before the root failure and dependants after.
     let text = lines.join("\n");
     const LIMIT: usize = 8000;
     let chars: Vec<_> = text.chars().collect();
     let truncated = chars.len() > LIMIT;
-    if chars.len() <= LIMIT {
-        (text, truncated)
+    if !truncated {
+        (text, false)
     } else {
+        let cause_byte = text
+            .lines()
+            .scan(0, |offset, line| {
+                let start = *offset;
+                *offset += line.len() + 1;
+                Some((start, line))
+            })
+            .find(|(_, line)| {
+                line.starts_with("error:")
+                    || line.contains("hash mismatch")
+                    || line.contains("builder for")
+            })
+            .map(|(offset, _)| offset)
+            .unwrap_or(0);
+        let cause = text[..cause_byte].chars().count().saturating_sub(250);
+        let end = (cause + 2000).min(chars.len());
         (
             format!(
-                "{}\n[diagnostics shortened]\n{}",
-                chars[..1500].iter().collect::<String>(),
-                chars[chars.len() - 6500..].iter().collect::<String>()
+                "{}\n[diagnostics shortened; first error context]\n{}\n[diagnostics shortened; final context]\n{}",
+                chars[..500].iter().collect::<String>(),
+                chars[cause..end].iter().collect::<String>(),
+                chars[chars.len() - 5500..].iter().collect::<String>()
             ),
             true,
         )
@@ -246,6 +263,19 @@ mod tests {
             assert!(!text.contains(secret), "{text}");
         }
         assert!(text.contains("unfamiliar failure"));
+    }
+    #[test]
+    fn long_dependency_cascades_do_not_hide_the_first_failure() {
+        let log = format!(
+            "{}\nerror: root hash mismatch\n{}\nerror: final dependent failed",
+            "verbose progress\n".repeat(1000),
+            "error: dependent failed\n".repeat(1000)
+        );
+        let (text, truncated) = excerpt(&log);
+        assert!(truncated);
+        assert!(text.contains("root hash mismatch"));
+        assert!(text.ends_with("error: final dependent failed"));
+        assert!(text.chars().count() < 8100);
     }
     #[test]
     fn long_unicode_logs_preserve_tail_and_bound_output() {
