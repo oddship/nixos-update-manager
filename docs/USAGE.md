@@ -1,6 +1,6 @@
 # Usage and recovery
 
-NixOS Update Manager works with a local Git repository with at least one commit, tracked `flake.nix` and `flake.lock` files and a host under `nixosConfigurations`. See the [README](../README.md) for installation and [status](STATUS.md) for the development preview's tested scope.
+NixOS Update Manager works with a local Git repository with at least one commit, tracked `flake.nix` and `flake.lock` files and a host under `nixosConfigurations`. The flake may live in a subdirectory, such as one flake per host (`hosts/<name>/flake.nix`) sharing modules through a relative input like `path:../../common`. Choose the folder containing `hosts/`: each host is listed from its directory name and checked, applied, and committed against its own `flake.nix` and `flake.lock`. Per-host flakes take precedence over a `flake.nix` in the chosen folder. See the [README](../README.md) for installation and [status](STATUS.md) for the development preview's tested scope.
 
 ## Check, prepare, and review
 
@@ -86,6 +86,6 @@ State remains in `nixos-updates`. Desktop/D-Bus ID `io.github.oddship.NixOSUpdat
 
 ## Current restrictions
 
-Testing is limited to x86_64-linux, Nix 2.34.8, pinned unstable Nixpkgs, and GNOME 50.4. Shallow/detached repositories, merge conflicts, submodules, tracked symlinks, non-UTF-8 filenames, path inputs, impure evaluation, and import-from-derivation are unsupported. Required untracked sources must be reviewed and tracked by you; the app never stages them automatically.
+Testing is limited to x86_64-linux, Nix 2.34.8, pinned unstable Nixpkgs, and GNOME 50.4. Shallow/detached repositories, merge conflicts, submodules, tracked symlinks, non-UTF-8 filenames, absolute path inputs, relative path inputs outside the repository, impure evaluation, and import-from-derivation are unsupported. Required untracked sources must be reviewed and tracked by you; the app never stages them automatically.
 
 Scheduling, retention/history/preferences UI, wider notification/interruption coverage, accessibility, and a stable/unstable release matrix remain unfinished. See [release criteria](RELEASING.md). Contributor build and test instructions are in [CONTRIBUTING.md](../CONTRIBUTING.md).

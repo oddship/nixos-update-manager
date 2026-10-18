@@ -10,6 +10,8 @@ const record = (host, created, state = 'ready') => ({schema_version: 1, reposito
 assert(latestFor([record('desktop', 1), record('other', 99)], settings, normalize).host === 'desktop', 'Filter by host before selecting latest');
 assert(latestFor([record('desktop', 1), record('desktop', 2, 'preparing')], settings, normalize).state === 'preparing', 'Show the latest matching operation');
 assert(latestFor([{...record('desktop', 3), repository: {root: '/elsewhere', flake_dir: ''}}], settings, normalize) === null, 'Do not leak another folder’s state');
+assert(latestFor([{...record('desktop', 3), repository: {root: '/config', flake_dir: 'flake/hosts/desktop'}}], settings, normalize)?.created_at_millis === 3, 'Match per-host flakes under the chosen folder');
+assert(latestFor([{...record('desktop', 3), repository: {root: '/config', flake_dir: 'flake/hosts/other'}}], settings, normalize) === null, 'Do not match another host’s flake');
 assert(latestFor([record('desktop', 3)], null, normalize) === null, 'Missing settings is neutral');
 assert(latestFor([{schema_version: 1}], settings, normalize) === null, 'Malformed records are ignored');
 assert(latestFor([{...record('desktop', 3), schema_version: 99}], settings, normalize) === null, 'Unknown schemas are ignored');

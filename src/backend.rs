@@ -201,11 +201,10 @@ impl Store {
     }
 
     pub fn latest_for(root: &Path, flake: &Path, host: &str) -> Option<Candidate> {
-        Self::records(root)
-            .ok()?
-            .into_iter()
-            .rev()
-            .find(|c| c.repository.root.join(&c.repository.flake_dir) == flake && c.host == host)
+        Self::records(root).ok()?.into_iter().rev().find(|c| {
+            c.repository.root.join(&c.repository.flake_dir) == host_flake(flake, host)
+                && c.host == host
+        })
     }
 
     pub fn directory(&self, id: &str) -> Result<PathBuf> {
@@ -360,7 +359,7 @@ impl Store {
 
     pub fn check(&self, path: &Path, host: &str, policy: InputPolicy) -> Result<Candidate> {
         ensure!(!host.is_empty(), "choose a host configuration");
-        let repository = Repository::open(path)?;
+        let repository = Repository::open(&host_flake(path, host))?;
         ensure!(
             !self.root.starts_with(&repository.root),
             "keep updater state outside the configuration Git repository"
@@ -414,7 +413,7 @@ impl Store {
         let old_lock = fs::read(flake.join("flake.lock"))?;
         fs::write(dir.join("original.lock"), &old_lock)?;
         let old: Value = serde_json::from_slice(&old_lock)?;
-        validate_lock(&old)?;
+        validate_lock(&old, &c.repository.flake_dir)?;
         let hosts = discover_hosts(&flake)?;
         ensure!(
             hosts.iter().any(|h| h == &c.host),
@@ -460,7 +459,7 @@ impl Store {
             .context("resolving selected input updates")?;
         let new_lock = fs::read(flake.join("flake.lock"))?;
         let new: Value = serde_json::from_slice(&new_lock)?;
-        validate_lock(&new)?;
+        validate_lock(&new, &c.repository.flake_dir)?;
         c.changed_inputs = changed_inputs(&old, &new)?;
         c.input_changes = input_changes(&old, &new, &c.changed_inputs)?;
         for excluded in &c.policy.exclude {
@@ -497,7 +496,12 @@ impl Store {
                 .context("candidate derivation missing")?,
             &dir.join("candidate-drv-root"),
         )?;
-        match input_packages(&flake, &c.host, &c.changed_inputs) {
+        match input_packages(
+            &dir.join("source"),
+            &c.repository.flake_dir,
+            &c.host,
+            &c.changed_inputs,
+        ) {
             Ok(packages) => c.input_packages = packages,
             Err(error) if error.downcast_ref::<Cancelled>().is_some() => return Err(error),
             Err(error) => c.attribution_error = Some(format!("{error:#}")),
@@ -630,11 +634,21 @@ fn nix_string(value: &str) -> Result<String> {
     Ok(serde_json::to_string(value)?.replace("${", "\\${"))
 }
 
-fn input_packages(flake: &Path, host: &str, inputs: &[String]) -> Result<Vec<InputPackage>> {
+fn input_packages(
+    root: &Path,
+    flake_dir: &Path,
+    host: &str,
+    inputs: &[String],
+) -> Result<Vec<InputPackage>> {
     if inputs.is_empty() {
         return Ok(Vec::new());
     }
-    let source = nix_string(&format!("path:{}", flake.display()))?;
+    // A Git reference keeps relative path inputs resolvable against the whole snapshot.
+    let mut reference = format!("git+file://{}", root.display());
+    if !flake_dir.as_os_str().is_empty() {
+        reference.push_str(&format!("?dir={}", flake_dir.display()));
+    }
+    let source = nix_string(&reference)?;
     let host = nix_string(host)?;
     let inputs = inputs
         .iter()
@@ -749,18 +763,96 @@ fn nix() -> Command {
     cmd
 }
 
-fn validate_lock(lock: &Value) -> Result<()> {
+fn validate_lock(lock: &Value, flake_dir: &Path) -> Result<()> {
     ensure!(
         lock["version"] == json!(7),
         "only flake lock schema 7 is validated"
     );
-    for (_, node) in lock["nodes"].as_object().context("invalid lock nodes")? {
-        ensure!(
-            node["locked"]["type"] != "path",
-            "path inputs are not supported yet; use a Git input until source relocation is validated"
-        );
+    for id in lock["nodes"]
+        .as_object()
+        .context("invalid lock nodes")?
+        .keys()
+    {
+        local_path_input(lock, id, flake_dir, 0)?;
     }
     Ok(())
+}
+
+/// Relative path inputs resolve inside the Git snapshot; absolute or escaping paths would
+/// read live sources outside it. Returns the repository-relative location of local inputs.
+fn local_path_input(
+    lock: &Value,
+    id: &str,
+    flake_dir: &Path,
+    depth: usize,
+) -> Result<Option<PathBuf>> {
+    ensure!(depth < 64, "path input chain is too deep");
+    let node = &lock["nodes"][id];
+    if node["locked"]["type"] != "path" {
+        return Ok(None);
+    }
+    let path = Path::new(
+        node["locked"]["path"]
+            .as_str()
+            .context("path input has no path")?,
+    );
+    let parent = node["parent"].as_array().with_context(|| {
+        format!(
+            "path input {id} must be relative to its flake; absolute path inputs are not supported"
+        )
+    })?;
+    ensure!(
+        path.is_relative(),
+        "path input {id} must be relative to its flake; absolute path inputs are not supported"
+    );
+    let base = if parent.is_empty() {
+        flake_dir.to_owned()
+    } else {
+        let parent_id = resolve_reference(lock, &node["parent"], depth + 1)?;
+        match local_path_input(lock, parent_id, flake_dir, depth + 1)? {
+            Some(base) => base,
+            None => return Ok(None),
+        }
+    };
+    let mut location = PathBuf::new();
+    for component in base.join(path).components() {
+        match component {
+            std::path::Component::Normal(part) => location.push(part),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => ensure!(
+                location.pop(),
+                "path input {id} points outside the Git repository"
+            ),
+            _ => anyhow::bail!("path input {id} points outside the Git repository"),
+        }
+    }
+    Ok(Some(location))
+}
+
+/// A folder with `hosts/<name>/flake.nix` keeps one independently locked flake per host.
+pub fn host_flakes(folder: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(folder.join("hosts"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().join("flake.nix").is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names
+}
+
+pub fn host_flake(folder: &Path, host: &str) -> PathBuf {
+    let plain = matches!(
+        Path::new(host).components().collect::<Vec<_>>()[..],
+        [std::path::Component::Normal(_)]
+    );
+    let candidate = folder.join("hosts").join(host);
+    if plain && candidate.join("flake.nix").is_file() {
+        candidate
+    } else {
+        folder.to_owned()
+    }
 }
 
 pub fn discover_hosts(flake: &Path) -> Result<Vec<String>> {
@@ -927,6 +1019,42 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.downcast_ref::<ReviewChanged>().is_some());
+    }
+    #[test]
+    fn per_host_flakes_are_resolved_from_the_chosen_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path();
+        for host in ["rynix", "zephy"] {
+            fs::create_dir_all(folder.join("hosts").join(host)).unwrap();
+            fs::write(folder.join("hosts").join(host).join("flake.nix"), "{}").unwrap();
+        }
+        fs::create_dir_all(folder.join("hosts/notes")).unwrap();
+        assert_eq!(host_flakes(folder), vec!["rynix", "zephy"]);
+        assert_eq!(host_flake(folder, "zephy"), folder.join("hosts/zephy"));
+        assert_eq!(host_flake(folder, "notes"), folder);
+        assert_eq!(host_flake(folder, "../hosts/zephy"), folder);
+        assert!(host_flakes(&folder.join("hosts/zephy")).is_empty());
+    }
+    #[test]
+    fn path_inputs_must_stay_inside_the_repository() {
+        let lock = |path: &str, parent: Value| {
+            json!({"version":7,"root":"root","nodes":{
+                "root":{"inputs":{"common":"common","dep":"dep"}},
+                "common":{"locked":{"type":"path","path":path},"parent":parent,"inputs":{"nested":"nested"}},
+                "dep":{"locked":{"type":"github","rev":"one"},"inputs":{"inner":"inner"}},
+                "inner":{"locked":{"type":"path","path":"../../../x"},"parent":["dep"]},
+                "nested":{"locked":{"type":"path","path":"./sub"},"parent":["common"]}
+            }})
+        };
+        let host = Path::new("machines/hosts/zephy");
+        validate_lock(&lock("../../common", json!([])), host).unwrap();
+        assert_eq!(
+            local_path_input(&lock("../../common", json!([])), "nested", host, 0).unwrap(),
+            Some(PathBuf::from("machines/common/sub"))
+        );
+        assert!(validate_lock(&lock("../../../../outside", json!([])), host).is_err());
+        assert!(validate_lock(&lock("/etc/nixos", json!([])), host).is_err());
+        assert!(validate_lock(&lock("../../common", Value::Null), host).is_err());
     }
     #[test]
     fn changed_inputs_includes_follows_and_transitive_dependency_changes() {
