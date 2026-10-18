@@ -78,6 +78,22 @@ nixos-update-manager commit candidate-ABC123
 
 Use `--state-dir /tmp/updates-test` for isolated test state. `--update-input NAME` and `--exclude-input NAME` are repeatable Check options. Defaults advance direct root inputs; follows aliases resolve to their dependency changes. Conflicting shared-node exclusions fail explicitly. Checking copies an already-dirty/staged lock as-is rather than overwriting it.
 
+## Failure explanations
+
+Failed operations show local triage without a model request. Common diagnoses cover dependency hash mismatches, network/download failures, storage exhaustion, evaluation errors, authentication, stale candidates, builds, and Git hooks/signing. Unrecognised diagnostics remain available through the same **Explain failure** action. The summary reports the recorded activation state; an interrupted Apply is never described as a verified rollback.
+
+After testing the assistant connection in Settings, choose **Explain failure**. An editable preview shows exactly what will be shared: operation phase, local triage, and a shortened diagnostic excerpt. Paths, addresses, assignments, recognised credential lines, and private key blocks are removed on a best-effort basis. Arbitrary logs can contain unfamiliar secrets: review the preview and remove private content. Only **Send shown diagnostics** contacts your selected model. The preview is limited to 16,000 characters. Opening it does not send anything.
+
+The model can explain unfamiliar errors and suggest next steps. It receives no repository files or execution tools, cannot change your configuration, and cannot establish that an update is safe, activation succeeded, or a fix exists upstream. Its output is advisory. Failure explanations are not a repair agent or interactive chat.
+
+For recognised SHA-256 pnpm dependency mismatches, **Check current Nixpkgs definition** separately fetches one package definition from `raw.githubusercontent.com/NixOS/nixpkgs/nixos-unstable`. It sends no logs, paths, or credentials and appends the finding and source URL to the editable preview. It checks the declared dependency hash only: it does not establish candidate provenance, version equivalence, channel availability, or a successful build. Unsupported layouts and lookup failures produce no verified correction. This lookup is optional and independent of the model.
+
+For local JSON triage and the redacted preview without network access:
+
+```sh
+nixos-update-manager diagnose candidate-ABC123
+```
+
 ## Compatibility identifiers
 
 Canonical commands are `nixos-update-manager` and `nixos-update-manager-helper`; the module uses `services.nixos-update-manager`. Legacy binaries remain aliases, as do old leaf options under `services.nixos-updates`.

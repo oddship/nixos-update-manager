@@ -49,6 +49,7 @@
           # The app and helper share one output; embed its trusted helper path.
           export NIXOS_UPDATES_HELPER="$out/bin/nixos-update-manager-helper"
         '';
+        env.NIXOS_UPDATES_CURL = "${pkgs.curl}/bin/curl";
         env.NIXOS_UPDATES_NIX_ENV = "${pkgs.nix}/bin/nix-env";
         cargoBuildFlags = [ "--bins" ];
         nativeBuildInputs = [ pkgs.makeWrapper pkgs.pkg-config pkgs.wrapGAppsHook4 ];
@@ -89,7 +90,7 @@
         program = "${package}/bin/nixos-update-manager";
       };
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ just cargo rustc rustfmt clippy pkg-config gtk4 libadwaita git qemu python3 imagemagick fontconfig gjs pi-coding-agent ];
+        packages = with pkgs; [ just cargo rustc rustfmt clippy pkg-config gtk4 libadwaita git qemu python3 imagemagick fontconfig gjs pi-coding-agent curl ];
         shellHook = ''
           export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
           export RUST_TEST_THREADS="''${RUST_TEST_THREADS:-$CARGO_BUILD_JOBS}"

@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated 2026-10-05. This is a development preview, not a stable release.
+Updated 2026-10-18. This is a development preview, not a stable release.
 
 ## Implemented
 
@@ -8,13 +8,15 @@ Updated 2026-10-05. This is a development preview, not a stable release.
 - Background jobs, cancellation/retry, retained outputs, stale-review refresh, and closed-window notifications that reopen the app.
 - Experimental authenticated activation of the exact reviewed system, optional lock-only commit, and commit-only retry with durable Git recovery.
 - Optional GNOME 50 status indicator; installation leaves activation to the user.
-- Optional Pi explanations, enabled by a successful explicit connection test. Chat and source repair are unavailable.
+- Optional Pi update and generic failure explanations, enabled by a successful explicit connection test. Failures have local triage, an editable diagnostic preview and explicit Send, plus an optional fixed-endpoint upstream check for recognised pnpm hash mismatches. Chat and source repair are unavailable.
 
 See [usage and recovery](USAGE.md) for behavior and [architecture](../SPEC.md) for transaction boundaries.
 
 ## Validation scope
 
 The app has one build with GUI and CLI entry points, Pi as its only assistant, and one Nix package that includes the privileged helper. The optional GNOME indicator remains separate.
+
+The 2026-10-18 per-host/failure-explanation changes passed formatting, strict Clippy, all 40 Rust tests, indicator tests, and public documentation checks. PR #2 also passed real Nix per-host/relative-input, alternate-lock, and package-export probes. The final package and executable interface checks passed. All three disposable VM suites passed; the exact Apply/commit suite additionally verified local diagnoses after authentication refusal, a failing commit hook, and partial activation. Failure model requests were tested with scripted Pi responses only. Graphical review of the new failure dialogs remains pending: this maintenance session had no available browser/native automation surface. These checks do not establish real provider behaviour or visual accessibility.
 
 The final single-app source passed formatting, strict Clippy, all 30 Rust tests, and the indicator tests. The app and indicator packages built successfully. Package interface checks verified the CLI, compatibility aliases, and unwrapped helper. All three isolated NixOS VM checks passed, covering exact activation, authenticated helper behavior, Apply/lock-only commit, commit-only retry, and partial activation reporting. Real Nix probes also verified lock isolation, ten package exports, closure review, and Check/Prepare against a synthetic NixOS configuration without host activation.
 

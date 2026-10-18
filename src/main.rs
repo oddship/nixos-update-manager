@@ -36,6 +36,8 @@ enum Action {
     Prepare { id: String },
     /// Refresh the retained output's runtime review without rebuilding.
     Review { id: String },
+    /// Show local failure triage and the redacted model preview; no network request.
+    Diagnose { id: String },
     /// Read candidate history, including active operations, newest last.
     History,
     /// Preview and validate an exact candidate application.
@@ -148,6 +150,14 @@ fn run() -> Result<()> {
             "{}",
             serde_json::to_string_pretty(&Store::read(&state_dir, &id)?)?
         ),
+        Action::Diagnose { id } => {
+            let candidate = Store::read(&state_dir, &id)?;
+            anyhow::ensure!(
+                nixos_update_manager::diagnosis::available(&candidate),
+                "candidate has no explainable failure"
+            );
+            println!("{}", nixos_update_manager::pi::failure_context(&candidate)?);
+        }
         Action::History => println!(
             "{}",
             serde_json::to_string_pretty(&Store::records(&state_dir)?)?
