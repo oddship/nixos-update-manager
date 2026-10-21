@@ -38,3 +38,22 @@ export function latestFor(records, settings, canonicalize) {
     const timestamp = record => Number.isFinite(record.created_at_millis) ? record.created_at_millis : (Number.isFinite(record.created_at) ? record.created_at * 1000 : 0);
     return matches.sort((a, b) => timestamp(b) - timestamp(a))[0] ?? null;
 }
+
+export const SUCCESS_TTL = 5 * 60 * 1000;
+export const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+
+export function needsCheck(record, now = Date.now()) {
+    if (!record)
+        return true;
+    const success = ['applied', 'committed'].includes(record.state);
+    if (!success && !['up_to_date', 'updates_found', 'input_only', 'failed', 'cancelled', 'stale'].includes(record.state))
+        return false;
+    const timestamp = record.modified_at_millis ?? record.created_at_millis ?? record.created_at * 1000;
+    return !Number.isFinite(timestamp) || now - timestamp >= (success ? SUCCESS_TTL : CHECK_INTERVAL);
+}
+
+export function recordPresentation(record, now = Date.now()) {
+    if (['applied', 'committed'].includes(record?.state) && needsCheck(record, now))
+        return ['', 'Update status expired; a new check is due', 'software-update-available-symbolic'];
+    return presentation(record?.state);
+}

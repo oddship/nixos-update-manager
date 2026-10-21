@@ -7,16 +7,18 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import {latestFor, presentation} from './model.js';
+import {latestFor, needsCheck, recordPresentation} from './model.js';
 
 const APP = 'io.github.oddship.NixOSUpdates.desktop';
 const LIMIT = 1024 * 1024;
 const RECORD_LIMIT = 256;
 
-// Never run Nix, Git, or privileged operations in the Shell process.
+// Backend work runs in a separate application process; never block Shell.
 export default class NixOSUpdatesIndicator extends Extension {
     enable() {
         this._cancel = new Gio.Cancellable();
+        this._checking = false;
+        this._retryAfter = 0;
         this._state = Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_state_dir(), 'nixos-updates']));
         this._button = new PanelMenu.Button(0.0, 'NixOS Update Manager');
         const box = new St.BoxLayout();
@@ -42,10 +44,9 @@ export default class NixOSUpdatesIndicator extends Extension {
         this._button.menu.addMenuItem(this._open);
         Main.panel.addToStatusArea(this.uuid, this._button);
         this._queue();
-        // Retry when the app has never created its state directory; otherwise monitors drive updates.
+        // Refresh time-based expiry even when no state files change.
         this._fallback = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 15, () => {
-            if (!this._rootMonitor || !this._watched)
-                this._queue();
+            this._queue();
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -78,7 +79,7 @@ export default class NixOSUpdatesIndicator extends Extension {
 
     async _read(file, cancel) {
         const info = await new Promise((resolve, reject) => file.query_info_async(
-            'standard::type,standard::size', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
+            'standard::type,standard::size,time::modified', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
             GLib.PRIORITY_DEFAULT, cancel, (object, result) => {
                 try { resolve(object.query_info_finish(result)); } catch (error) { reject(error); }
             }));
@@ -93,7 +94,9 @@ export default class NixOSUpdatesIndicator extends Extension {
             }));
             if (bytes.get_size() > LIMIT)
                 throw new Error('State file too large');
-            return JSON.parse(new TextDecoder().decode(bytes.get_data()));
+            const record = JSON.parse(new TextDecoder().decode(bytes.get_data()));
+            record.modified_at_millis = info.get_attribute_uint64('time::modified') * 1000;
+            return record;
         } finally {
             // A local read stream close is short; use async close to keep Shell responsive.
             stream.close_async(GLib.PRIORITY_DEFAULT, null, (object, result) => {
@@ -137,7 +140,7 @@ export default class NixOSUpdatesIndicator extends Extension {
     }
 
     _show(record, settings) {
-        const [label, status, icon] = presentation(record?.state);
+        const [label, status, icon] = recordPresentation(record);
         this._label.text = label;
         this._label.visible = label.length > 0;
         this._icon.icon_name = icon;
@@ -146,6 +149,33 @@ export default class NixOSUpdatesIndicator extends Extension {
         this._host.label.text = settings?.host ? `Host: ${settings.host.slice(0, 64)}` : '';
         this._host.visible = Boolean(settings?.host);
         this._open.label.text = record?.state === 'ready' ? 'Review update' : 'Open NixOS Update Manager';
+    }
+
+    _check(record, settings) {
+        if (!settings || typeof settings.path !== 'string' || !settings.path.startsWith('/') ||
+            typeof settings.host !== 'string' || !settings.host ||
+            this._checking || !needsCheck(record) || Date.now() < (this._retryAfter ?? 0))
+            return;
+        // Keep retries bounded if the executable is missing or the backend is busy.
+        this._retryAfter = Date.now() + 15 * 60 * 1000;
+        const args = ['nixos-update-manager', 'check', settings.path, '--host', settings.host];
+        for (const input of record?.policy?.update ?? [])
+            args.push('--update-input', input);
+        for (const input of record?.policy?.exclude ?? [])
+            args.push('--exclude-input', input);
+        try {
+            const process = Gio.Subprocess.new(args,
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+            this._checking = true;
+            const cancel = this._cancel;
+            process.wait_async(null, (object, result) => {
+                try { object.wait_finish(result); } catch (_error) { /* Retry later. */ }
+                if (cancel !== this._cancel)
+                    return;
+                this._checking = false;
+                this._queue();
+            });
+        } catch (_error) { /* Retry later; the app may not be installed. */ }
     }
 
     async _refresh() {
@@ -172,6 +202,7 @@ export default class NixOSUpdatesIndicator extends Extension {
                 return;
             const record = latestFor(records, settings, path => GLib.canonicalize_filename(path, null));
             this._show(record, settings);
+            this._check(record, settings);
             const watched = record?.id ?? null;
             if (watched !== this._watched) {
                 this._recordMonitor?.cancel();

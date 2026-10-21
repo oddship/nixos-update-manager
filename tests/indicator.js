@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import {latestFor, presentation} from '../extension/model.js';
+import {latestFor, presentation, needsCheck, recordPresentation, SUCCESS_TTL, CHECK_INTERVAL} from '../extension/model.js';
 function assert(value, message) {
     if (!value)
         throw new Error(message);
@@ -19,4 +19,18 @@ assert(presentation('apply_needs_attention')[1].includes('apply result'), 'An un
 assert(presentation('commit_needs_attention')[0] === 'Retry commit', 'Commit failure must distinguish the already applied system');
 assert(presentation('preparing')[0] === 'Preparing', 'Expose active progress');
 assert(presentation('future_state')[0] === '', 'Unknown states must not invent a result');
-print('Indicator selection and status checks passed.');
+
+const completed = {...record('desktop', 1, 'committed'), modified_at_millis: 1000};
+assert(!needsCheck(completed, 1000 + SUCCESS_TTL - 1), 'Keep recent success visible');
+assert(needsCheck(completed, 1000 + SUCCESS_TTL), 'Expire success at its TTL');
+assert(recordPresentation(completed, 1000 + SUCCESS_TTL)[0] === '', 'Expired success must not say Updated');
+assert(recordPresentation(completed, 1000)[0] === 'Updated', 'Use modification time after a long operation');
+assert(needsCheck({...completed, state: 'applied'}, 1000 + SUCCESS_TTL), 'Applied success also expires');
+assert(!needsCheck({...completed, state: 'up_to_date'}, 1000 + CHECK_INTERVAL - 1), 'Avoid excessive availability checks');
+assert(needsCheck({...completed, state: 'up_to_date'}, 1000 + CHECK_INTERVAL), 'Recheck availability periodically');
+for (const state of ['checking', 'preparing', 'ready', 'review_stale', 'applying', 'commit_needs_attention', 'apply_needs_attention'])
+    assert(!needsCheck({...completed, state}, 1000 + CHECK_INTERVAL * 10), `Preserve ${state}`);
+assert(needsCheck(null), 'Check configured hosts without history');
+assert(needsCheck({...completed, modified_at_millis: undefined, created_at_millis: undefined}), 'Legacy records expire');
+assert(needsCheck({...completed, state: 'updates_found'}, 1000 + CHECK_INTERVAL), 'Refresh available input revisions too');
+print('Indicator selection, expiry, and availability checks passed.');

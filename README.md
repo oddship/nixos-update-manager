@@ -60,7 +60,7 @@ After rebuilding and logging back in, enable **NixOS Update Manager** in GNOME E
 gnome-extensions enable nixos-updates@oddship.github.io
 ```
 
-The module leaves extension activation to you. The indicator reads the default app state directory, does not support custom `--state-dir` locations, and never checks or applies updates itself.
+The module leaves extension activation to you. The indicator reads the default app state directory, does not support custom `--state-dir` locations, and runs availability checks in a separate app process when enabled: after the five-minute “Updated” status expires, then every six hours. Checks use the last input policy and never build or apply updates. Active operations and pending reviews are preserved; failed launches retry after 15 minutes.
 
 ## Optional explanations
 

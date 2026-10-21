@@ -46,7 +46,7 @@ gnome-extensions enable nixos-updates@oddship.github.io
 gnome-extensions disable nixos-updates@oddship.github.io
 ```
 
-The indicator reads default state for the last checked/saved folder and host; custom `--state-dir` locations are unsupported. It only displays recorded status and opens the app. It never runs Nix, Git, or Apply. Reads are bounded; histories beyond 256 records show neutral Open app status.
+The indicator reads default state for the last checked/saved folder and host; custom `--state-dir` locations are unsupported. It displays recorded status and opens the app. “Updated” expires five minutes after the record was last modified, triggering an availability check in a separate app process. While enabled, the indicator rechecks every six hours using the last input policy, including when updates were previously found. Active operations, prepared reviews, and results needing attention are preserved. Checks never build or apply updates; unavailable or busy backend launches retry after 15 minutes. Reads are bounded; histories beyond 256 records show neutral Open app status.
 
 ## Update assistant
 
