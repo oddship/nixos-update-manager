@@ -1,0 +1,58 @@
+name: Publish tags to FlakeHub
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed SemVer tag to publish (for example, v0.1.0)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flakehub-publish-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  flakehub-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # Authenticate to FlakeHub using GitHub OIDC.
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          number = r"(?:0|[1-9][0-9]*)"
+          identifier = rf"(?:{number}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+          pattern = rf"v{number}\.{number}\.{number}(?:-{identifier}(?:\.{identifier})*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+          if not re.fullmatch(pattern, os.environ["RELEASE_TAG"]):
+              sys.exit("Expected a v-prefixed SemVer tag, for example v0.1.0 or v0.1.0-rc.1")
+          PY
+      - name: Check out release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ format('refs/tags/{0}', env.RELEASE_TAG) }}
+      - name: Install Determinate Nix
+        uses: DeterminateSystems/determinate-nix-action@96c5ee93a9dddf2830d31e1da6ec719077336c28 # v3
+      - name: Publish to FlakeHub
+        uses: DeterminateSystems/flakehub-push@dceefcb33cba27bde28f8540d8b4537cb925c46b
+        with:
+          visibility: public
+          tag: ${{ env.RELEASE_TAG }}
+          source-revision: dceefcb33cba27bde28f8540d8b4537cb925c46b
+          include-output-paths: true
