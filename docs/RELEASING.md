@@ -34,3 +34,24 @@ The deterministic updater must work without a model. Do not enable source repair
 5. Verify tag-based installation in a fresh guest after publication.
 
 Do not publish guest disks, state directories, credentials, or unsanitized logs as assets. Document checksums and installation paths for any assets beyond GitHub's generated source archives.
+
+## FlakeHub publishing
+
+The `Publish tags to FlakeHub` workflow publishes public versions of
+`oddship/nixos-update-manager` when a v-prefixed SemVer tag is pushed, for example
+`v0.1.0` or `v0.1.0-rc.1`. Complete the release checks above before pushing a tag;
+publishing does not run or replace those checks.
+
+Ensure the GitHub organization/repository is enabled for publishing in FlakeHub.
+Authentication uses GitHub OIDC (`id-token: write`); no FlakeHub token secret is
+required.
+
+To publish an existing tag or retry a failed publication, open **Actions → Publish
+tags to FlakeHub → Run workflow** and enter the exact tag. The workflow must be
+present on the default branch for the manual trigger to appear. Both checkout and
+publication use that tag; a missing tag or invalid version fails the run.
+Runs for the same tag are serialized without cancelling an in-progress upload.
+
+Output-path metadata is included for FlakeHub Cache integration. This does not
+build or upload package binaries, and this workflow does not create a GitHub
+Release. Verify the published version and tag-based installation after it succeeds.
